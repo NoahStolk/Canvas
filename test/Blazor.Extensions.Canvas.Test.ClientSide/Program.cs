@@ -1,15 +1,16 @@
-using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
-using System.Threading.Tasks;
+using Microsoft.AspNetCore.Blazor.Hosting;
 
 namespace Blazor.Extensions.Canvas.Test.ClientSide
 {
     public class Program
     {
-        public static async Task Main(string[] args)
+        static void Main(string[] args)
         {
-            var builder = WebAssemblyHostBuilder.CreateDefault(args);
-            builder.RootComponents.Add<App>("app");
-            await builder.Build().RunAsync();
+            CreateHostBuilder(args).Build().Run();
         }
+
+        public static IWebAssemblyHostBuilder CreateHostBuilder(string[] args) =>
+            BlazorWebAssemblyHost.CreateDefaultBuilder()
+                .UseBlazorStartup<Startup>();
     }
 }

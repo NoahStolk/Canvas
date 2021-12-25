@@ -1,14 +1,18 @@
-import { v4 as uuidv4 } from 'uuid';
+declare global {
+    interface Window {
+        Blazor: any;
+    }
+}
+
+// declare const window: any;
 
 export class ContextManager {
+    private gl: any;
   private readonly contexts = new Map<string, any>();
   private readonly webGLObject = new Array<any>();
   private readonly contextName: string;
   private webGLContext = false;
   private readonly prototypes: any;
-
-  private readonly patterns = new Map<string, any>();
-
   private readonly webGLTypes = [
     WebGLBuffer, WebGLShader, WebGLProgram, WebGLFramebuffer, WebGLRenderbuffer, WebGLTexture, WebGLUniformLocation
   ];
@@ -54,10 +58,102 @@ export class ContextManager {
   }
 
   public call = (canvas: HTMLCanvasElement, method: string, args: any) => {
-    const context = this.getContext(canvas);
-    return this.callWithContext(context, method, args);
+      const context = this.getContext(canvas);
+      return this.callWithContext(context, method, args);
   }
 
+
+  public pinGLEx = (canvas: HTMLCanvasElement) => {
+      this.gl = this.getContext(canvas);
+  }
+
+    public createPinEx = (canvas: HTMLCanvasElement) => {
+        const id = this.webGLObject.length;
+        this.webGLObject.push(this.getContext(canvas));
+        return { webGLType: 'WebGLPin', id: id };
+    }
+
+    public usePinEx = (pinId: any) => {
+        this.gl = this.webGLObject[pinId];
+    }
+
+    public createUniformMatrixEx = (floats: any) => {
+        const id = this.webGLObject.length;
+        this.webGLObject.push(floats);
+        return { webGLType: 'WebGLUniformMatrix', id: id };
+    }
+
+    public renderUniformMatrixIEx = (args: any) => {
+      const locationId = window.Blazor.platform.readInt32Field(args, 0);
+      const matrixId = window.Blazor.platform.readInt32Field(args, 8);
+      this.gl.uniformMatrix4fv(this.webGLObject[locationId], false, this.webGLObject[matrixId]);
+    }
+
+    public renderUniformMatrixEx = (locationId: any, matrixId: any) => {
+      this.gl.uniformMatrix4fv(this.webGLObject[locationId], false, this.webGLObject[matrixId]);
+    }
+
+    // conversion to js float 32 array from:
+    // https://stackoverflow.com/questions/63902497/blazor-wasm-invoke-javascript-pass-large-array-is-very-slow
+    //
+    public uniformMatrix4fvEx = (locationId: any, floats: any) => {
+        var m = floats + 12;
+        var r = Module.HEAP32[m >> 2];
+        var j = new Float32Array(Module.HEAPF32.buffer, m + 4, r);
+        this.gl.uniformMatrix4fv(this.webGLObject[locationId], false, j);
+    }
+
+    public drawElementsEx = (count: any) => {
+        this.gl.drawElements(this.gl.TRIANGLES, count, this.gl.UNSIGNED_SHORT, 0);
+    }
+
+    public bindFloatBufferEx = (attribute: any, bufferId: any, valueSize: any) => {
+        this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.webGLObject[bufferId]);
+        this.gl.enableVertexAttribArray(attribute);
+        this.gl.vertexAttribPointer(attribute, valueSize, this.gl.FLOAT, false, 0, 0);
+    }
+
+    public bindUShortBufferEx = (bufferId: any) => {
+        this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, this.webGLObject[bufferId]);
+    }
+
+    public bindTextureEx = (uniformId: any, textureId: any) => {
+        this.gl.activeTexture(this.gl.TEXTURE0);
+        this.gl.bindTexture(this.gl.TEXTURE_2D, this.webGLObject[textureId]);
+        this.gl.uniform1i(this.webGLObject[uniformId], 0);
+    }
+
+    public blendFuncEx = () => {
+        this.gl.blendFunc(this.gl.SRC_ALPHA, this.gl.ONE);
+    }
+
+    public enableBlendEx = () => {
+        this.gl.enable(this.gl.BLEND);
+    }
+
+    public disableBlendEx = () => {
+        this.gl.disable(this.gl.BLEND);
+    }
+
+    public useProgramEx = (programId: any) => {
+        this.gl.useProgram(this.webGLObject[programId]);
+    }
+
+    public depthMaskOnEx = () => {
+        this.gl.depthMask(true);
+    }
+
+    public depthMaskOffEx = () => {
+        this.gl.depthMask(false);
+    }
+
+    public clearDepthAndColorEx = () => {
+        this.gl.clear(this.gl.DEPTH_BUFFER_BIT | this.gl.COLOR_BUFFER_BIT);
+    }
+    public clearDepthEx = () => {
+        this.gl.clear(this.gl.DEPTH_BUFFER_BIT);
+    }
+    
   public callBatch = (canvas: HTMLCanvasElement, batchedCalls: any[][]) => {
     const context = this.getContext(canvas);
     for (let i = 0; i < batchedCalls.length; i++) {
@@ -74,23 +170,10 @@ export class ContextManager {
   }
 
   private callWithContext = (context: any, method: string, args: any) => {
-    const result = this.prototypes[method].apply(context, args != undefined ? args.map((value) => this.deserialize(method, value)) : []);
-
-    if (method == 'createPattern') {
-      const key = uuidv4(); 
-      this.patterns.set(key, result);
-      return key;
-    }
-
-    return this.serialize(result);
+    return this.serialize(this.prototypes[method].apply(context, args != undefined ? args.map((value) => this.deserialize(method, value)) : []));
   }
 
   private setPropertyWithContext = (context: any, property: string, value: any) => {
-
-    if (property == 'fillStyle') {
-      value = this.patterns.get(value) || value;
-    }
-
     context[property] = this.deserialize(property, value);
   }
 
@@ -109,7 +192,7 @@ export class ContextManager {
     if (object.hasOwnProperty("webGLType") && object.hasOwnProperty("id")) {
       return (this.webGLObject[object["id"]]);
     } else if (Array.isArray(object) && !method.endsWith("v")) {
-      return Int8Array.of(...(object as number[]));
+      return Uint8Array.of(...(object as number[]));
     } else if (typeof(object) === "string" && (method === "bufferData" || method === "bufferSubData")) {
       let binStr = window.atob(object);
       let length = binStr.length;
